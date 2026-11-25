@@ -196,10 +196,37 @@ function observe(groups: readonly Group[]): readonly (Group & {
             ? { ...value, '@reverse': next }
             : without(value, '@reverse');
       }
+      node = settle(node);
       if (Object.keys(without(node, '@id')).length > 0) {
         entry.details.push(detail(context, node));
         entry.groups.add(context);
       }
+    };
+    /**
+     * An observation's own statements. A resource it embeds is pod data: its
+     * description moves to the group's nodes, as if written separately, and
+     * a reference stays; embedded observations are extracted.
+     */
+    const settle = (node: JsonLd): JsonLd => {
+      let changed = false;
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(node)) {
+        if (key.startsWith('@') && key !== '@included') {
+          out[key] = value;
+          continue;
+        }
+        const all = Array.isArray(value) ? value : [value];
+        const next = all.map((child: unknown) => {
+          if (!isHitValue(child)) return item(child);
+          if (Object.keys(child).length === 1) return child;
+          extra.push(item(child) as JsonLd);
+          return { '@id': child['@id'] };
+        });
+        const same = next.every((v, i) => v === all[i]);
+        changed ||= !same;
+        out[key] = same ? value : next.filter((v) => v !== MOVED);
+      }
+      return changed ? out : node;
     };
     const extra: JsonLd[] = [];
     const named = new Set<string>();

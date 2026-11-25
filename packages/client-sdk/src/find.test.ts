@@ -708,4 +708,55 @@ describe('Pod find requests', () => {
       },
     });
   });
+
+  it('extracts an observation of a hit embedded in another observation', async () => {
+    const one = `${base}/e1`;
+    const two = `${base}/e2`;
+    const about = 'https://schema.org/about';
+    const text = (value: string) => ({
+      'https://schema.org/text': [{ '@value': value }],
+    });
+    const embedded = [
+      {
+        '@id': one,
+        [FIND_RESULT]: [
+          {
+            '@id': '_:first',
+            ...text('first'),
+            [about]: [
+              {
+                '@id': two,
+                [FIND_RESULT]: [{ '@id': '_:second', ...text('second') }],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const separate = [
+      { '@id': one, [FIND_RESULT]: [{ '@id': '_:first' }] },
+      { '@id': '_:first', ...text('first'), [about]: [{ '@id': two }] },
+      { '@id': two, [FIND_RESULT]: [{ '@id': '_:second' }] },
+      { '@id': '_:second', ...text('second') },
+    ];
+    const read = async (graph: unknown) => {
+      const at = (body: unknown) =>
+        createPod(base, {
+          auth: bearer('test'),
+          fetch: async () => jsonLd(body),
+        });
+      return [
+        await at([{ '@id': tasks, '@graph': graph }]).find('x'),
+        await at(graph).findFlat('x'),
+      ];
+    };
+    const expected = await read(separate);
+    expect(expected[1]).toMatchObject({
+      body: {
+        nodes: [{ '@id': one }, { '@id': two }],
+        observations: [{ text: ['first'] }, { text: ['second'] }],
+      },
+    });
+    expect(await read(embedded)).toEqual(expected);
+  });
 });
