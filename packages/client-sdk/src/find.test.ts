@@ -1206,3 +1206,73 @@ describe('Find answers read by the RDF they encode', () => {
     expect(second).not.toBe(first);
   });
 });
+
+describe('Find groups as named-graph JSON-LD writes them', () => {
+  it.each<[string, Record<string, unknown>]>([
+    ['an empty property', { 'x:p': [] }],
+    ['a relative key', { name: 'x' }],
+    ['an empty type', { '@type': [] }],
+    ['an empty reverse map', { '@reverse': {} }],
+    [
+      'an included node without statements',
+      { '@included': [{ '@id': 'x:y' }] },
+    ],
+    ['an empty nest', { '@nest': {} }],
+  ])(
+    'rejects a group with %s, although it states nothing',
+    async (_name, extra) => {
+      const body = [{ '@id': tasks, '@graph': [], ...extra }];
+      await expect(answering(body, base).pod.find('x')).rejects.toMatchObject(
+        bodyRejected,
+      );
+    },
+  );
+});
+
+describe('Find values read as JSON-LD expansion reads them', () => {
+  it.each([
+    ['the empty list first', 0],
+    ['rdf:nil first', 1],
+  ])('types a node with rdf:nil once, %s', async (_name, first) => {
+    const nil = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil';
+    const values = [{ '@list': [] }, { '@id': nil }];
+    const graph = [
+      {
+        '@id': `${base}/e1`,
+        'http://www.w3.org/1999/02/22-rdf-syntax-ns#type':
+          first === 0 ? values : [...values].reverse(),
+      },
+    ];
+    expect(await ok(answering(graph, base).pod.findFlat('x'))).toEqual({
+      nodes: [{ '@id': `${base}/e1`, '@type': [nil] }],
+      observations: [],
+    });
+  });
+
+  it('resolves a relative datatype against the Find URL', async () => {
+    const graph = [
+      { '@id': `${base}/e1`, 'x:p': [{ '@value': 'red', '@type': '#Color' }] },
+    ];
+    expect(await ok(answering(graph, base).pod.findFlat('x'))).toEqual({
+      nodes: [
+        {
+          '@id': `${base}/e1`,
+          'x:p': [{ '@value': 'red', '@type': `${url}#Color` }],
+        },
+      ],
+      observations: [],
+    });
+  });
+
+  it('drops an unmapped key of a list, as expansion does', async () => {
+    const graph = [
+      { '@id': `${base}/e1`, 'x:p': [{ '@list': ['red'], note: 'memo' }] },
+    ];
+    expect(await ok(answering(graph, base).pod.findFlat('x'))).toEqual({
+      nodes: [
+        { '@id': `${base}/e1`, 'x:p': [{ '@list': [{ '@value': 'red' }] }] },
+      ],
+      observations: [],
+    });
+  });
+});

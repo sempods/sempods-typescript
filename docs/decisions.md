@@ -72,6 +72,32 @@ shared by Node and React, not a service instance.
 _Why:_ every client of a Pod sees the same data model; conveniences can evolve
 without changing servers.
 
+## Expanded JSON-LD is read by one local subset, not a JSON-LD processor
+
+Where the SDK reads a Pod answer by its RDF, one internal module in
+client-sdk (`src/rdf/`) turns expanded JSON-LD into quads and quads into
+canonical flattened node objects: JSON-LD 1.1 toRdf for documents without an
+active context, relative references against the document URL. Any `@context`
+other than `null`, `{}` or a list of them rejects the document. Find is the
+first reader on it (#418, #422); the shared node shape is the one resource
+reads already return. Resource reads, the catalogue and the Context
+descriptions keep their spec-pinned canonical shapes, and CONSTRUCT passes
+its body through unchanged; moving one of them onto the module would change
+what it accepts and needs a decision of its own. The module is not exported.
+Its evidence is the context-free toRdf part of the W3C JSON-LD API test
+suite, vendored with its source commit; the cases where the SDK
+deliberately differs are listed in that test.
+
+_Why:_ Pods answer expanded JSON-LD, so a context processor (remote
+contexts, a document loader, compaction) would add code and a fetch path
+for input the SDK never needs, and a context it cannot apply fails closed
+instead of being misread. A JSON-LD library as a dependency would also give
+up the package's only-`oauth4webapi` runtime footprint. Apps that read
+arbitrary public RDF keep jsonld.js and n3 as their own dependencies, as the
+[public-RDF recipe](../examples/todo/recipes/public-rdf.ts) does. N-Quads
+were not chosen as the shared basis: JSON-LD is what Pods answer and what
+the SDK hands to callers.
+
 ## One owner renews credentials, one executor resends
 
 `PodAuth` supplies and renews credentials; the client's request executor alone

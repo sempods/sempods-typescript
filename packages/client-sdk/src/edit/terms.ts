@@ -1,5 +1,6 @@
 import type { JsonLd } from '../results.js';
 import { EMBEDDABLE_IRI, RDF_TYPE } from '../iri.js';
+import { canonical } from '../rdf/terms.js';
 
 /** One value object of the canonical shape (SPS-CRUD-023): `{"@id"}` or `{"@value"}`. */
 export type Term = { readonly [key: string]: unknown };
@@ -67,28 +68,6 @@ export function hasLanguage(term: Term, language: string | null): boolean {
   return language === null
     ? tag === undefined
     : typeof tag === 'string' && tag.toLowerCase() === language.toLowerCase();
-}
-
-/** A canonical key for RDF value data; equal keys denote the same terms. */
-export function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (typeof value === 'object' && value !== null) {
-    const literal = '@value' in value;
-    const entries = Object.entries(value)
-      // RDF 1.1: a simple literal is an xsd:string.
-      .filter(
-        ([k, v]) =>
-          v !== undefined && !(literal && k === '@type' && v === XSD_STRING),
-      )
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([k, v]) =>
-        k === '@language' && typeof v === 'string'
-          ? `${JSON.stringify(k)}:${JSON.stringify(v.toLowerCase())}`
-          : `${JSON.stringify(k)}:${canonical(v)}`,
-      );
-    return `{${entries.join(',')}}`;
-  }
-  return JSON.stringify(value);
 }
 
 /** RDF value sets: order-insensitive, language tags case-insensitive. */

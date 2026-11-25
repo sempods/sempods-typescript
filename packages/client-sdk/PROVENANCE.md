@@ -105,6 +105,21 @@ active context; a context that is not inert rejects), following the
 OpenAPI note that graph membership is determined by the RDF a Find answer
 encodes. It is a local subset, not a full JSON-LD processor.
 
+That reader is the internal module `src/rdf/` since #422. Its evidence is the
+W3C JSON-LD 1.1 API test suite, `w3c/json-ld-api` at
+`fd4f7eb41f679fb73a54923143c473c3a1d06093` (2026-11-18), file
+`tests/toRdf-manifest.jsonld`: the 62 toRdf cases without an active context
+and without a context or toRdf option are copied verbatim into
+`src/fixtures/w3c-to-rdf.json` under the W3C Test Suite License (2008
+version), with its required
+[notice](https://github.com/sempods/sempods-typescript/blob/v0.9.0-dev.3/packages/client-sdk/src/fixtures/w3c-to-rdf.NOTICE.md)
+beside it in the repository, and
+`scripts/vendor-w3c-to-rdf.mjs` regenerates the file. The fixture is test
+data and is not part of the published package. 400 cases with an active context, the
+`expandContext`, `rdfDirection` and JSON-LD 1.0 cases and the separate
+remote-document manifest are not run; `src/rdf/w3c-to-rdf.test.ts` lists the
+seven cases where the SDK deliberately differs from the suite.
+
 The consent prompt of `prepareAuthorization` (#362) was checked against
 `sempods/sempods-spec` at `c6308c157d8c78be0ba6e9d91dba39a11a9ce883`
 (`spec/core/auth.md` §7): SPS-AUTH-039 lets a Pod reuse standing grants without

@@ -1,0 +1,504 @@
+{
+  "$source": {
+    "repository": "https://github.com/w3c/json-ld-api",
+    "commit": "fd4f7eb41f679fb73a54923143c473c3a1d06093",
+    "path": "tests/toRdf-manifest.jsonld",
+    "license": "W3C Test Suite License (2008 version), see the notice",
+    "notice": "w3c-to-rdf.NOTICE.md",
+    "note": "Selection: every case of the manifest whose input has no @context other than null, {} or a list of them, and that needs no expandContext, rdfDirection or JSON-LD 1.0 option. Each input is the original file's text and each expected output the original N-Quads, both unchanged; base is the manifest's baseIri plus the input path, or the case's base option. Regenerate with scripts/vendor-w3c-to-rdf.mjs rather than edit.",
+    "total": 468,
+    "excluded": {
+      "active context": 400,
+      "rdfDirection is a non-default toRdf option the SDK does not offer": [
+        "#tdi09",
+        "#tdi10",
+        "#tdi11",
+        "#tdi12"
+      ],
+      "expandContext supplies a context": ["#te077"],
+      "JSON-LD 1.0 processing mode": ["#ter32"]
+    }
+  },
+  "cases": [
+    {
+      "id": "#t0001",
+      "name": "Plain literal with URIs",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0001-in.jsonld",
+      "input": "{\n  \"@id\": \"http://greggkellogg.net/foaf#me\",\n  \"http://xmlns.com/foaf/0.1/name\": \"Gregg Kellogg\"\n}",
+      "expect": "<http://greggkellogg.net/foaf#me> <http://xmlns.com/foaf/0.1/name> \"Gregg Kellogg\" .\n"
+    },
+    {
+      "id": "#t0004",
+      "name": "Literal with language tag",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0004-in.jsonld",
+      "input": "{\n  \"http://www.w3.org/2000/01/rdf-schema#label\": {\n    \"@value\": \"A plain literal with a lang tag.\",\n    \"@language\": \"en-us\"\n  }\n}",
+      "expect": "_:b0 <http://www.w3.org/2000/01/rdf-schema#label> \"A plain literal with a lang tag.\"@en-us .\n"
+    },
+    {
+      "id": "#t0005",
+      "name": "Extended character set literal",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0005-in.jsonld",
+      "input": "{\n  \"@id\": \"http://greggkellogg.net/foaf#me\",\n  \"http://xmlns.com/foaf/0.1/knows\": {\n    \"http://xmlns.com/foaf/0.1/name\": {\"@value\": \"Herman Iván\", \"@language\": \"hu\"}\n  }\n}\n",
+      "expect": "<http://greggkellogg.net/foaf#me> <http://xmlns.com/foaf/0.1/knows> _:b0 .\n_:b0 <http://xmlns.com/foaf/0.1/name> \"Herman Iván\"@hu .\n"
+    },
+    {
+      "id": "#t0006",
+      "name": "Typed literal",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0006-in.jsonld",
+      "input": "{\n  \"@id\":  \"http://greggkellogg.net/foaf#me\",\n  \"http://purl.org/dc/terms/created\":  {\n    \"@value\": \"1957-02-27\",\n    \"@type\": \"http://www.w3.org/2001/XMLSchema#date\"\n  }\n}\n",
+      "expect": "<http://greggkellogg.net/foaf#me> <http://purl.org/dc/terms/created> \"1957-02-27\"^^<http://www.w3.org/2001/XMLSchema#date> .\n"
+    },
+    {
+      "id": "#t0007",
+      "name": "Tests 'a' generates rdf:type and object is implicit IRI",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0007-in.jsonld",
+      "input": "{\n  \"@id\": \"http://greggkellogg.net/foaf#me\",\n  \"@type\": \"http://xmlns.com/foaf/0.1/Person\"\n}",
+      "expect": "<http://greggkellogg.net/foaf#me> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Person> .\n"
+    },
+    {
+      "id": "#t0016",
+      "name": "Empty IRI expands to resource location",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0016-in.jsonld",
+      "input": "{\n  \"@id\": \"\",\n  \"@type\": \"http://www.w3.org/2000/01/rdf-schema#Resource\"\n}",
+      "expect": "<https://w3c.github.io/json-ld-api/tests/toRdf/0016-in.jsonld> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Resource> .\n"
+    },
+    {
+      "id": "#t0017",
+      "name": "Relative IRI expands relative resource location",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0017-in.jsonld",
+      "input": "{\n  \"@id\": \"a/b\",\n  \"@type\": \"http://www.w3.org/2000/01/rdf-schema#Resource\"\n}",
+      "expect": "<https://w3c.github.io/json-ld-api/tests/toRdf/a/b> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Resource> .\n"
+    },
+    {
+      "id": "#t0018",
+      "name": "Frag ID expands relative resource location",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0018-in.jsonld",
+      "input": "{\n  \"@id\": \"#frag\",\n  \"@type\": \"http://www.w3.org/2000/01/rdf-schema#Resource\"\n}",
+      "expect": "<https://w3c.github.io/json-ld-api/tests/toRdf/0018-in.jsonld#frag> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2000/01/rdf-schema#Resource> .\n"
+    },
+    {
+      "id": "#t0036",
+      "name": "Use nodeMapGeneration bnode labels",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0036-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/\",\n  \"ex:prop1\": {\n    \"@list\": [ { \"@id\": \"_:x1\" }, { \"@id\": \"_:x2\" } ]\n  },\n  \"ex:prop2\": { \"@id\": \"_:x3\" }\n}\n",
+      "expect": "<http://example.com/> <ex:prop1> _:b3 .\n<http://example.com/> <ex:prop2> _:b2 .\n_:b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> _:b0 .\n_:b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> _:b4 .\n_:b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> _:b1 .\n_:b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n"
+    },
+    {
+      "id": "#t0113",
+      "name": "Dataset with a IRI named graph",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0113-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example/g\",\n  \"@graph\": {\n    \"@id\": \"http://example/s\",\n    \"http://example/p\": {\"@id\": \"http://example/o\"}\n  }\n}",
+      "expect": "<http://example/s> <http://example/p> <http://example/o> <http://example/g> .\n"
+    },
+    {
+      "id": "#t0114",
+      "name": "Dataset with a IRI named graph",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0114-in.jsonld",
+      "input": "{\n  \"@id\": \"_:g\",\n  \"@graph\": {\n    \"@id\": \"http://example/s\",\n    \"http://example/p\": {\"@id\": \"http://example/o\"}\n  }\n}",
+      "expect": "<http://example/s> <http://example/p> <http://example/o> _:b0 .\n"
+    },
+    {
+      "id": "#t0115",
+      "name": "Dataset with a default and two named graphs",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0115-in.jsonld",
+      "input": "{\n  \"@graph\": [{\n    \"@id\": \"http://example/s0\",\n    \"http://example/p0\": {\"@id\": \"http://example/o0\"}\n  },\n  {\n    \"@id\": \"http://example/g\",\n    \"@graph\": {\n      \"@id\": \"http://example/s1\",\n      \"http://example/p1\": {\"@id\": \"http://example/o1\"}\n    }\n  },\n  {\n    \"@id\": \"_:g\",\n    \"@graph\": {\n      \"@id\": \"http://example/s2\",\n      \"http://example/p2\": {\"@id\": \"http://example/o2\"}\n    }\n  }]\n}",
+      "expect": "<http://example/s0> <http://example/p0> <http://example/o0> .\n<http://example/s1> <http://example/p1> <http://example/o1> <http://example/g> .\n<http://example/s2> <http://example/p2> <http://example/o2> _:b0 .\n"
+    },
+    {
+      "id": "#t0116",
+      "name": "Dataset from node with embedded named graph",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0116-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example/s0\",\n  \"http://example/p0\": {\"@id\": \"http://example/o0\"},\n  \"@graph\": {\n    \"@id\": \"http://example/s1\",\n    \"http://example/p1\": {\"@id\": \"http://example/o1\"}\n  }\n}",
+      "expect": "<http://example/s0> <http://example/p0> <http://example/o0> .\n<http://example/s1> <http://example/p1> <http://example/o1> <http://example/s0> .\n"
+    },
+    {
+      "id": "#t0117",
+      "name": "Dataset from node with embedded named graph (bnode)",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0117-in.jsonld",
+      "input": "{\n  \"http://example/p0\": {\"@id\": \"http://example/o0\"},\n  \"@graph\": {\n    \"@id\": \"http://example/s1\",\n    \"http://example/p1\": {\"@id\": \"http://example/o1\"}\n  }\n}\n",
+      "expect": "<http://example/s1> <http://example/p1> <http://example/o1> _:b0 .\n_:b0 <http://example/p0> <http://example/o0> .\n"
+    },
+    {
+      "id": "#t0133",
+      "name": "Reverse term with property based indexed container",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/0133-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"https://example.org/item/1\",\n    \"@reverse\": {\n      \"http://www.w3.org/1999/02/22-rdf-syntax-ns#subject\": [\n        {\n          \"https://example.net/ns#addedIn\": [\n            {\n              \"@id\": \"https://example.org/v1\"\n            }\n          ],\n          \"http://www.w3.org/1999/02/22-rdf-syntax-ns#object\": [\n            {\n              \"@id\": \"https://example.net/ns#A\"\n            }\n          ],\n          \"http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate\": [\n            {\n              \"@id\": \"http://www.w3.org/1999/02/22-rdf-syntax-ns#type\"\n            }\n          ]\n        }\n      ]\n    }\n  }\n]\n",
+      "expect": "_:b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#object> <https://example.net/ns#A> .\n_:b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> .\n_:b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#subject> <https://example.org/item/1> .\n_:b0 <https://example.net/ns#addedIn> <https://example.org/v1> .\n"
+    },
+    {
+      "id": "#te001",
+      "name": "drop free-floating nodes",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/e001-in.jsonld",
+      "input": "{\"@id\": \"http://example.org/test#example\"}",
+      "expect": ""
+    },
+    {
+      "id": "#te003",
+      "name": "drop null and unmapped properties",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/e003-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.org/id\",\n  \"http://example.org/property\": null,\n  \"regularJson\": {\n    \"nonJsonLd\": \"property\",\n    \"deep\": [{\n      \"foo\": \"bar\"\n    }, {\n      \"bar\": \"foo\"\n    }]\n  }\n}",
+      "expect": ""
+    },
+    {
+      "id": "#te013",
+      "name": "expand already expanded",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/e013-in.jsonld",
+      "input": "[{\n  \"@id\": \"http://example.com/id1\",\n  \"@type\": [\"http://example.com/t1\"],\n  \"http://example.com/term1\": [\"v1\"],\n  \"http://example.com/term2\": [{\"@value\": \"v2\", \"@type\": \"http://example.com/t2\"}],\n  \"http://example.com/term3\": [{\"@value\": \"v3\", \"@language\": \"en\"}],\n  \"http://example.com/term4\": [4],\n  \"http://example.com/term5\": [50, 51]\n}]",
+      "expect": "<http://example.com/id1> <http://example.com/term1> \"v1\" .\n<http://example.com/id1> <http://example.com/term2> \"v2\"^^<http://example.com/t2> .\n<http://example.com/id1> <http://example.com/term3> \"v3\"@en .\n<http://example.com/id1> <http://example.com/term4> \"4\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.com/id1> <http://example.com/term5> \"50\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.com/id1> <http://example.com/term5> \"51\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n<http://example.com/id1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/t1> .\n"
+    },
+    {
+      "id": "#te045",
+      "name": "Top-level value objects are removed",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/e045-in.jsonld",
+      "input": "{\n    \"@value\": \"free-floating value\"\n}\n",
+      "expect": ""
+    },
+    {
+      "id": "#te046",
+      "name": "Free-floating nodes are removed",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/e046-in.jsonld",
+      "input": "{\n    \"@graph\": [\n        { \"@id\": \"http://example.com/free-floating-node\" },\n        { \"@value\": \"free-floating value object\" },\n        { \"@value\": \"free-floating value language-tagged string\",  \"@language\": \"en\" },\n        { \"@value\": \"free-floating value typed value\",  \"@type\": \"http://example.com/type\" },\n        \"free-floating plain string\",\n        true,\n        false,\n        null,\n        1,\n        1.5\n    ]\n}\n",
+      "expect": ""
+    },
+    {
+      "id": "#te076",
+      "name": "base option overrides document location",
+      "kind": "positive",
+      "base": "http://example/base/",
+      "input": "{\n  \"@id\": \"relative-iri\",\n  \"http://prop\": \"value\"\n}\n",
+      "expect": "<http://example/base/relative-iri> <http://prop> \"value\" .\n"
+    },
+    {
+      "id": "#te123",
+      "name": "Value objects including invalid literal datatype IRIs are rejected",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/e123-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/foo\",\n  \"http://example.com/bar\": {\"@value\": \"bar\", \"@type\": \"http://example.com/baz z\"}\n}",
+      "error": "invalid typed value"
+    },
+    {
+      "id": "#ter25",
+      "name": "Invalid reverse property map",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er25-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example/foo\",\n  \"@reverse\": {\n    \"@id\": \"http://example/bar\"\n  }\n}",
+      "error": "invalid reverse property map"
+    },
+    {
+      "id": "#ter27",
+      "name": "Invalid @id value",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er27-in.jsonld",
+      "input": "{\n  \"@id\": true\n}",
+      "error": "invalid @id value"
+    },
+    {
+      "id": "#ter28",
+      "name": "Invalid type value",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er28-in.jsonld",
+      "input": "{\n  \"@type\": true\n}",
+      "error": "invalid type value"
+    },
+    {
+      "id": "#ter29",
+      "name": "Invalid value object value",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er29-in.jsonld",
+      "input": "{\n  \"http://example/prop\": {\"@value\": [\"foo\"]}\n}",
+      "error": "invalid value object value"
+    },
+    {
+      "id": "#ter30",
+      "name": "Invalid language-tagged string",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er30-in.jsonld",
+      "input": "{\n  \"http://example/prop\": {\"@value\": \"foo\", \"@language\": true}\n}",
+      "error": "invalid language-tagged string"
+    },
+    {
+      "id": "#ter31",
+      "name": "Invalid @index value",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er31-in.jsonld",
+      "input": "{\n  \"http://example.com/vocab/indexMap\": {\n    \"@value\": \"simple string\",\n    \"@language\": \"en\",\n    \"@index\": true\n  }\n}",
+      "error": "invalid @index value"
+    },
+    {
+      "id": "#ter33",
+      "name": "Invalid @reverse value",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er33-in.jsonld",
+      "input": "{\n  \"http://example/prop\": {\n    \"@reverse\": true\n  }\n}",
+      "error": "invalid @reverse value"
+    },
+    {
+      "id": "#ter37",
+      "name": "Invalid value object (unexpected keyword)",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er37-in.jsonld",
+      "input": "{\n  \"http://example/foo\": {\"@value\": \"bar\", \"@id\": \"http://example/baz\"}\n}",
+      "error": "invalid value object"
+    },
+    {
+      "id": "#ter38",
+      "name": "Invalid value object (@type and @language)",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er38-in.jsonld",
+      "input": "{\n  \"http://example/foo\": {\"@value\": \"bar\", \"@language\": \"en\", \"@type\": \"http://example/type\"}\n}",
+      "error": "invalid value object"
+    },
+    {
+      "id": "#ter39",
+      "name": "Invalid language-tagged value",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er39-in.jsonld",
+      "input": "{\n  \"http://example/foo\": {\"@value\": true, \"@language\": \"en\"}\n}",
+      "error": "invalid language-tagged value"
+    },
+    {
+      "id": "#ter40",
+      "name": "Invalid typed value",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er40-in.jsonld",
+      "input": "{\n  \"http://example/foo\": {\"@value\": \"bar\", \"@type\": \"_:dt\"}\n}",
+      "error": "invalid typed value"
+    },
+    {
+      "id": "#ter41",
+      "name": "Invalid set or list object",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er41-in.jsonld",
+      "input": "{\n  \"http://example/prop\": {\"@list\": [\"foo\"], \"@id\": \"http://example/bar\"}\n}",
+      "error": "invalid set or list object"
+    },
+    {
+      "id": "#ter54",
+      "name": "Invalid value object, multiple values for @type.",
+      "kind": "negative",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/er54-in.jsonld",
+      "input": "{\n  \"ex:prop\": {\n    \"@value\": \"value\",\n    \"@type\": [\"ex:a\", \"ex:b\"]\n  }\n}",
+      "error": "invalid typed value"
+    },
+    {
+      "id": "#tjs15",
+      "name": "Transform JSON literal aleady in expanded form",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/js15-in.jsonld",
+      "input": "{\n  \"http://example.org/vocab#object\": [{\"@value\": {\"foo\": \"bar\"}, \"@type\": \"@json\"}]\n}",
+      "expect": "_:c14n0 <http://example.org/vocab#object> \"{\\\"foo\\\":\\\"bar\\\"}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .\n"
+    },
+    {
+      "id": "#tjs22",
+      "name": "Transform JSON literal (null) aleady in expanded form.",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/js22-in.jsonld",
+      "input": "{\n  \"http://example.org/vocab#null\": {\"@value\": null, \"@type\": \"@json\"}\n}",
+      "expect": "_:b0 <http://example.org/vocab#null> \"null\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .\n"
+    },
+    {
+      "id": "#tjs23",
+      "name": "Transform JSON literal (empty array).",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/js23-in.jsonld",
+      "input": "{\n  \"http://example.org/vocab#null\": {\"@value\": [], \"@type\": \"@json\"}\n}",
+      "expect": "_:b0 <http://example.org/vocab#null> \"[]\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .\n"
+    },
+    {
+      "id": "#tli01",
+      "name": "@list containing @list",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/li01-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example/A\",\n  \"http://example.com/foo\": {\"@list\": [{\"@list\": [\"baz\"]}]}\n}",
+      "expect": "<http://example/A> <http://example.com/foo> _:l1 .\n_:l1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> _:l2 .\n_:l1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n_:l2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> \"baz\" .\n_:l2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n"
+    },
+    {
+      "id": "#tli02",
+      "name": "@list containing empty @list",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/li02-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example/A\",\n  \"http://example.com/foo\": {\"@list\": [{\"@list\": []}]}\n}",
+      "expect": "<http://example/A> <http://example.com/foo> _:l1 .\n_:l1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n_:l1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n"
+    },
+    {
+      "id": "#tnt01",
+      "name": "literal_ascii_boundaries",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt01-in.jsonld",
+      "input": "[\n {\n   \"@id\": \"http://a.example/s\",\n   \"http://a.example/p\": [\n     {\n       \"@value\": \"\\u0000\\t\\u000B\\f\\u000e&([]\\u007F\"\n     }\n   ]\n }\n]"
+    },
+    {
+      "id": "#tnt02",
+      "name": "literal_with_UTF8_boundaries",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt02-in.jsonld",
+      "input": "[\n {\n   \"@id\": \"http://a.example/s\",\n   \"http://a.example/p\": [\n     {\n       \"@value\": \"߿ࠀ࿿က쿿퀀퟿�𐀀𿿽񀀀󿿽􀀀􏿽\"\n     }\n   ]\n }\n]"
+    },
+    {
+      "id": "#tnt03",
+      "name": "literal_all_controls",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt03-in.jsonld",
+      "input": "[\n {\n   \"@id\": \"http://a.example/s\",\n   \"http://a.example/p\": [\n     {\n       \"@value\": \"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\u000b\\f\\u000E\\u000F\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001A\\u001B\\u001C\\u001D\\u001E\\u001F\"\n     }\n   ]\n }\n]"
+    },
+    {
+      "id": "#tnt04",
+      "name": "literal_all_punctuation",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt04-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \" !\\\"#$%&():;<=>?@[]^_`{|}~\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt05",
+      "name": "literal_with_squote",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt05-in.jsonld",
+      "input": "[\n {\n   \"@id\": \"http://a.example/s\",\n   \"http://a.example/p\": [\n     {\n       \"@value\": \"x'y\"\n     }\n   ]\n }\n]"
+    },
+    {
+      "id": "#tnt06",
+      "name": "literal_with_2_squotes",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt06-in.jsonld",
+      "input": "[\n {\n   \"@id\": \"http://a.example/s\",\n   \"http://a.example/p\": [\n     {\n       \"@value\": \"x''y\"\n     }\n   ]\n }\n]"
+    },
+    {
+      "id": "#tnt07",
+      "name": "literal_with_dquote",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt07-in.jsonld",
+      "input": "[\n {\n   \"@id\": \"http://a.example/s\",\n   \"http://a.example/p\": [\n     {\n       \"@value\": \"x\\\"y\"\n     }\n   ]\n }\n]"
+    },
+    {
+      "id": "#tnt08",
+      "name": "literal_with_2_dquotes",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt08-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"x\\\"\\\"y\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt09",
+      "name": "literal_with_REVERSE_SOLIDUS2",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt09-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://example.org/ns#s\",\n    \"http://example.org/ns#p1\": [\n      {\n        \"@value\": \"test-\\\\\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt10",
+      "name": "literal_with_CHARACTER_TABULATION",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt10-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"\\t\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt11",
+      "name": "literal_with_BACKSPACE",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt11-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"\\b\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt12",
+      "name": "literal_with_LINE_FEED",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt12-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"\\n\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt13",
+      "name": "literal_with_CARRIAGE_RETURN",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt13-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"\\r\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt14",
+      "name": "literal_with_FORM_FEED",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt14-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"\\f\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt15",
+      "name": "literal_with_REVERSE_SOLIDUS",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt15-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"\\\\\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#tnt16",
+      "name": "literal_with_numeric_escape4",
+      "kind": "syntax",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/nt16-in.jsonld",
+      "input": "[\n  {\n    \"@id\": \"http://a.example/s\",\n    \"http://a.example/p\": [\n      {\n        \"@value\": \"\\u000F\"\n      }\n    ]\n  }\n]"
+    },
+    {
+      "id": "#twf01",
+      "name": "Triples including invalid subject IRIs are rejected",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/wf01-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/a b\",\n  \"http://example.com/foo\": \"bar\"\n}",
+      "expect": ""
+    },
+    {
+      "id": "#twf02",
+      "name": "Triples including invalid predicate IRIs are rejected",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/wf02-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/foo\",\n  \"http://example.com/a b\": \"bar\"\n}",
+      "expect": ""
+    },
+    {
+      "id": "#twf03",
+      "name": "Triples including invalid object IRIs are rejected",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/wf03-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/foo\",\n  \"http://example.com/bar\": {\"@id\": \"http://example.com/baz z\"}\n}",
+      "expect": ""
+    },
+    {
+      "id": "#twf04",
+      "name": "Triples including invalid type IRIs are rejected",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/wf04-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/foo\",\n  \"@type\": [\"http://example.com/bar\", \"http://in valid\"]\n}",
+      "expect": "<http://example.com/foo> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/bar> .\n"
+    },
+    {
+      "id": "#twf05",
+      "name": "Triples including invalid language tags are rejected",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/wf05-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/foo\",\n  \"http://example.com/bar\": {\"@value\": \"bar\", \"@language\": \"a b\"}\n}",
+      "expect": ""
+    },
+    {
+      "id": "#twf07",
+      "name": "Triples including invalid graph name IRIs are rejected",
+      "kind": "positive",
+      "base": "https://w3c.github.io/json-ld-api/tests/toRdf/wf07-in.jsonld",
+      "input": "{\n  \"@id\": \"http://example.com/invalid gn\",\n  \"@graph\": {\n    \"@id\": \"http://example.com/foo\",\n    \"http://example.com/bar\": \"baz\"\n  }\n}",
+      "expect": ""
+    }
+  ]
+}

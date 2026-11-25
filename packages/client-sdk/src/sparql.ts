@@ -1,8 +1,6 @@
 import { SdkError } from './errors.js';
 import { EMBEDDABLE_IRI } from './iri.js';
-
-/** xsd:language lexical form; deliberately not full BCP47 validation. */
-const LANGUAGE_TAG = /^[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*$/;
+import { LANGUAGE_TAG } from './rdf/terms.js';
 
 /** One SELECT result document; no inferred variables or client-side deduplication. */
 export interface SelectResult {

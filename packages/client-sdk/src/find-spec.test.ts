@@ -18,6 +18,7 @@ import {
   sent,
 } from './find.helpers.test.js';
 import { RDF_TYPE } from './iri.js';
+import { isomorphic } from './rdf/nquads.helpers.test.js';
 
 const cases = findCases();
 const fixtures = Object.fromEntries(cases);
@@ -81,32 +82,6 @@ function dataset(
   }
   return out;
 }
-/** Equal up to blank-node renaming (few blank nodes: try each bijection). */
-function isomorphic(actual: Set<string>, nquads: string): boolean {
-  const expected = nquads.split('\n').filter((line) => line.trim());
-  const blanks = (lines: Iterable<string>) => [
-    ...new Set([...lines].flatMap((line) => line.match(/_:\w+/g) ?? [])),
-  ];
-  const ours = blanks(actual);
-  const theirs = blanks(expected);
-  if (ours.length !== theirs.length || actual.size !== new Set(expected).size)
-    return false;
-  const permutations = (list: string[]): string[][] =>
-    list.length <= 1
-      ? [list]
-      : list.flatMap((first, i) =>
-          permutations([...list.slice(0, i), ...list.slice(i + 1)]).map(
-            (rest) => [first, ...rest],
-          ),
-        );
-  return permutations(theirs).some((order) => {
-    const rename = new Map(ours.map((label, i) => [label, order[i]!]));
-    return [...actual].every((line) =>
-      expected.includes(line.replace(/_:\w+/g, (l) => rename.get(l)!)),
-    );
-  });
-}
-
 describe('shared Find acceptance cases', () => {
   it.each(cases.filter(([, c]) => c.grouped))(
     'decodes %s grouped through Pod.find',
