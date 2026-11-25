@@ -313,6 +313,23 @@ describe('Pod find requests', () => {
     ).rejects.toMatchObject({ reason: { code: 'response', problem: 'body' } });
   });
 
+  it('keeps a node with only stored sps:findResult values as answered', async () => {
+    // Scalar JSON-LD values are not rewritten into arrays.
+    const stored = {
+      '@id': `${base}/e1`,
+      [FIND_RESULT]: { '@id': `${base}/saved` },
+    };
+    const fetch = vi.fn<PodFetch>(async () =>
+      jsonLd([{ '@id': tasks, '@graph': [stored] }]),
+    );
+    const answer = await createPod(base, { auth: bearer('test'), fetch }).find(
+      'x',
+    );
+    if (answer.kind !== 'ok') throw new Error(answer.kind);
+    expect(answer.body[0]!.nodes).toEqual([stored]);
+    expect(answer.body[0]!.observations).toEqual([]);
+  });
+
   it('reads an observation embedded in its link, and leaves a blank subject as answered', async () => {
     const hit = `${base}/e1`;
     const blank = { '@id': '_:b', [FIND_RESULT]: [{ '@id': '_:c' }] };

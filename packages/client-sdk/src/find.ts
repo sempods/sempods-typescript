@@ -130,6 +130,11 @@ function observe(groups: readonly Group[]): readonly (Group & {
         kept.push(node);
         continue;
       }
+      // A node without an observation stays exactly as answered.
+      if (values.every((value) => blankLabel(value) === undefined)) {
+        kept.push(node);
+        continue;
+      }
       const stored: unknown[] = [];
       for (const value of values) {
         const label = blankLabel(value);
