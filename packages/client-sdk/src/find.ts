@@ -229,7 +229,7 @@ function observe(groups: readonly Group[]): readonly (Group & {
       const out: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(node)) {
         if (key === FIND_RESULT && isHit(node)) {
-          const all = Array.isArray(value) ? value : [value];
+          const all = findResults(node);
           if (all.some((v) => blankLabel(v) !== undefined)) {
             changed = true;
             const stored = all.filter((v) => blankLabel(v) === undefined);
@@ -327,8 +327,12 @@ function findResults(node: JsonLd): readonly unknown[] {
   return list(node[FIND_RESULT]);
 }
 
+/** The values of a property, with `@set` wrappers unwrapped. */
 function list(value: unknown): readonly unknown[] {
-  return Array.isArray(value) ? value : value === undefined ? [] : [value];
+  if (value === undefined) return [];
+  return (Array.isArray(value) ? value : [value]).flatMap((item: unknown) =>
+    isNode(item) && Object.hasOwn(item, '@set') ? list(item['@set']) : [item],
+  );
 }
 
 /** The hits a node names as reverse `sps:findResult` subjects. */

@@ -642,4 +642,41 @@ describe('Pod find requests', () => {
       '@reverse',
     );
   });
+
+  it('unwraps @set values of sps:findResult, forward and reverse', async () => {
+    const hit = `${base}/e1`;
+    const text = { 'https://schema.org/text': [{ '@value': 'Konzert' }] };
+    const forward = [
+      { '@id': hit, [FIND_RESULT]: [{ '@id': '_:m' }] },
+      { '@id': '_:m', ...text },
+    ];
+    const wrapped = [
+      { '@id': hit, [FIND_RESULT]: { '@set': [{ '@id': '_:m' }] } },
+      { '@id': '_:m', ...text },
+    ];
+    const reverse = [
+      {
+        '@id': '_:m',
+        ...text,
+        '@reverse': { [FIND_RESULT]: [{ '@set': [{ '@id': hit }] }] },
+      },
+    ];
+    const read = async (graph: unknown) => {
+      const at = (body: unknown) =>
+        createPod(base, {
+          auth: bearer('test'),
+          fetch: async () => jsonLd(body),
+        });
+      return [
+        await at([{ '@id': tasks, '@graph': graph }]).find('x'),
+        await at(graph).findFlat('x'),
+      ];
+    };
+    const expected = await read(forward);
+    expect(expected[1]).toMatchObject({
+      body: { nodes: [{ '@id': hit }], observations: [{ text: ['Konzert'] }] },
+    });
+    expect(await read(wrapped)).toEqual(expected);
+    expect(await read(reverse)).toEqual(expected);
+  });
 });
