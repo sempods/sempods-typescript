@@ -221,7 +221,7 @@ function read(body: unknown): {
     // stay named.
     checkContext(body);
     list(body['@graph']).forEach(top);
-  } else (Array.isArray(body) ? body : [body]).forEach(top);
+  } else list(body).forEach(top);
   return { quads, names, blankNamed };
 }
 
@@ -453,9 +453,17 @@ function list(value: unknown): readonly unknown[] {
   });
 }
 
-/** A node object: neither a value object nor a list. */
+/**
+ * A node object: neither a value object, a list nor a set. A set that was
+ * not unwrapped where JSON-LD allows one rejects rather than reading empty.
+ */
 function isNodeObject(value: unknown): value is JsonLd {
-  return isNode(value) && !('@value' in value) && !('@list' in value);
+  return (
+    isNode(value) &&
+    !('@value' in value) &&
+    !('@list' in value) &&
+    !('@set' in value)
+  );
 }
 
 /** An absolute IRI; a relative key or a blank predicate states nothing. */

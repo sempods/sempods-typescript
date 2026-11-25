@@ -1062,4 +1062,23 @@ describe('Find answers read by the RDF they encode', () => {
       ),
     ).toEqual(stable(await answering([group], base).pod.find('x')));
   });
+
+  it('unwraps a top-level @set like a plain array, in both forms', async () => {
+    const graph = [{ '@id': one, '@type': [event] }];
+    const group = { '@id': tasks, '@graph': graph };
+    const read = (body: unknown, form: 'find' | 'findFlat') =>
+      answering(body, base).pod[form]('x');
+    expect(stable(await read({ '@set': graph }, 'findFlat'))).toEqual(
+      stable(await read(graph, 'findFlat')),
+    );
+    expect(stable(await read({ '@set': [group] }, 'find'))).toEqual(
+      stable(await read([group], 'find')),
+    );
+    expect(
+      (await ok(answering({ '@set': graph }, base).pod.findFlat('x'))).nodes,
+    ).toHaveLength(1);
+    await expect(
+      read({ '@context': { '@vocab': 'x:' }, '@set': graph }, 'findFlat'),
+    ).rejects.toMatchObject(bodyRejected);
+  });
 });
