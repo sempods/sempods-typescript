@@ -782,6 +782,20 @@ describe('Find answers read by the RDF they encode', () => {
       ],
     ],
     [
+      'a reverse map with a context without effect',
+      [
+        {
+          '@id': '_:m',
+          ...text('first'),
+          '@reverse': { '@context': null, [FIND_RESULT]: [{ '@id': one }] },
+        },
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
       '@included nodes and single values',
       {
         '@id': one,

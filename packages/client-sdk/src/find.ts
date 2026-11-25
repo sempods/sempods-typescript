@@ -173,13 +173,15 @@ function read(body: unknown): {
       } else if (key === '@reverse') {
         if (!isNode(entry)) throw invalid();
         checkContext(entry);
-        for (const [predicate, values] of Object.entries(entry))
+        for (const [predicate, values] of Object.entries(entry)) {
+          if (predicate === '@context') continue;
           for (const item of list(values)) {
             if (!isNodeObject(item)) throw invalid();
             if (isPredicate(predicate))
               emit(subjectOf(item), predicate, subject, graph);
             node(item, graph);
           }
+        }
       } else if (key === '@included') {
         for (const item of list(entry)) node(item, graph);
       } else if (!key.startsWith('@') && isPredicate(key)) {
