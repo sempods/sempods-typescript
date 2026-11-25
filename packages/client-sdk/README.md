@@ -215,8 +215,11 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
   a key or value rejects with `response/body` rather than being misread;
   `null`, `{}` and lists of them are accepted. Invalid JSON-LD, such as a
   value object with an `@id` or a non-string `@language`, rejects the same
-  way, and so does what JSON-LD would only drop: a free-floating value or an
-  ill-formed language tag. A form the SDK cannot represent, such as a set or
+  way, and so does what JSON-LD would only drop: a free-floating value or a
+  language tag outside the `xsd:language` lexical form. That form is the
+  only language-tag check; full BCP 47 well-formedness is not checked, so
+  `en-a` is accepted. Keys that expansion drops, such as `note` without a
+  colon or `@future`, are dropped before an object's shape is checked. A form the SDK cannot represent, such as a set or
   an array inside a list or a graph inside `@nest`, rejects too. Absolute IRIs
   are taken as given. `nodes` are the Pod's data in one canonical form: one flattened node
   object per subject and group, `@type` an array of IRIs, every other

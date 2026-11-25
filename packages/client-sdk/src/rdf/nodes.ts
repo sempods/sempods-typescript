@@ -1,6 +1,7 @@
 import { RDF_TYPE } from '../iri.js';
 import type { JsonLd } from '../results.js';
 import {
+  subjectOf,
   termKey,
   type Graph,
   type Quad,
@@ -72,7 +73,8 @@ export function nodeMap(label: (id: string) => string): NodeMap {
 
 /**
  * A dataset as flattened expanded JSON-LD: the default graph's node objects,
- * then one `{"@id", "@graph"}` object per named graph.
+ * a named graph's statements under `@graph` of its name's node object (JSON-LD
+ * 1.1 flattening), so each `@id` appears once at the top level.
  */
 export function flatten(
   quads: readonly Quad[],
@@ -84,11 +86,7 @@ export function flatten(
     if (quad.g !== undefined && !names.includes(quad.g)) names.push(quad.g);
     map.add(map.node(quad.g, quad.s), quad.p, quad.o);
   }
-  return [
-    ...map.nodes(undefined),
-    ...names.map((name) => ({
-      '@id': name.startsWith('_:') ? label(name.slice(2)) : name,
-      '@graph': map.nodes(name),
-    })),
-  ];
+  for (const name of names)
+    map.node(undefined, subjectOf(name))['@graph'] = map.nodes(name);
+  return map.nodes(undefined);
 }

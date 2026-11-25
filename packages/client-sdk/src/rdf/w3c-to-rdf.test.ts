@@ -34,9 +34,14 @@ const fixture = JSON.parse(
     readonly total: number;
     readonly excluded: Readonly<Record<string, number | readonly string[]>>;
   };
-  readonly cases: readonly W3cCase[];
+  /** Each input as the original file's text. */
+  readonly cases: readonly (W3cCase & { readonly input: string })[];
 };
-const cases = fixture.cases.map((c) => [c.id, c] as const);
+const parsed: readonly W3cCase[] = fixture.cases.map((c) => ({
+  ...c,
+  input: JSON.parse(c.input) as unknown,
+}));
+const cases = parsed.map((c) => [c.id, c] as const);
 
 /**
  * Where the SDK rejects a document that JSON-LD 1.1 reads with a warning
@@ -59,7 +64,11 @@ const IRIS_AS_GIVEN = new Set(['#twf01', '#twf03', '#twf04', '#twf07']);
 function read(input: unknown, base: string): Set<string> {
   let fresh = 0;
   const blank = (): Subject => ({ kind: 'blank', id: `l${fresh++}` });
-  return nquads(lowerLists(fromJsonLd(input, base).quads, blank));
+  const quads = lowerLists(fromJsonLd(input, base).quads, blank);
+  const lines = nquads(quads);
+  // Each statement once: the Set below must not hide a duplicate.
+  expect(lines.size).toBe(quads.length);
+  return lines;
 }
 
 function rejection(input: unknown, base: string): string | undefined {
@@ -131,7 +140,7 @@ describe('W3C JSON-LD toRdf, context-free cases', () => {
   it.each(Object.entries(REJECTED))(
     'rejects %s, which JSON-LD reads, as %s',
     (id, code) => {
-      const c = fixture.cases.find((entry) => entry.id === id)!;
+      const c = parsed.find((entry) => entry.id === id)!;
       expect(rejection(c.input, c.base)).toBe(code);
     },
   );
@@ -139,7 +148,7 @@ describe('W3C JSON-LD toRdf, context-free cases', () => {
   it.each([...IRIS_AS_GIVEN])(
     'keeps the statements of %s with an IRI as given',
     (id) => {
-      const c = fixture.cases.find((entry) => entry.id === id)!;
+      const c = parsed.find((entry) => entry.id === id)!;
       const lines = [...read(c.input, c.base)];
       const kept = lines.filter((line) => /<[^>]* [^>]*>/.test(line));
       expect(kept.length).toBeGreaterThan(0);

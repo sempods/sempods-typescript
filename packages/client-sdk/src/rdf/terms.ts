@@ -49,6 +49,13 @@ export function graphOf(subject: Subject): string {
   return subject.kind === 'iri' ? subject.value : `_:${subject.id}`;
 }
 
+/** The subject a graph name stands for. */
+export function subjectOf(name: string): Subject {
+  return name.startsWith('_:')
+    ? { kind: 'blank', id: name.slice(2) }
+    : { kind: 'iri', value: name };
+}
+
 /** Equal keys denote the same RDF term. */
 export function termKey(term: Term): string {
   switch (term.kind) {
@@ -64,7 +71,7 @@ export function termKey(term: Term): string {
         : canonical(lexical(term.value));
     case 'list':
       // The empty list is rdf:nil; every other one has its own head node.
-      return term.id === 0 ? '()' : `(#${term.id})`;
+      return term.id === 0 ? `<${RDF_NIL}>` : `(#${term.id})`;
   }
 }
 

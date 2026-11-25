@@ -18,7 +18,8 @@ import {
  * what a key means rejects the document rather than being misread.
  *
  * Where JSON-LD only drops or warns, this reader rejects: a free-floating
- * value, an ill-formed language tag and an array nested in an array.
+ * value, a language tag outside the `xsd:language` lexical form (not full
+ * BCP 47 well-formedness) and an array nested in an array.
  * Absolute IRIs are taken as given. The differences from the W3C toRdf suite are listed
  * in src/rdf/w3c-to-rdf.test.ts.
  */
@@ -91,7 +92,7 @@ export function fromJsonLd(body: unknown, documentUrl: string): Dataset {
     // Value objects and lists follow the same context rule as nodes.
     checkContext(value);
     checkIndex(value);
-    if (Object.hasOwn(value, '@value')) return valueObject(value);
+    if (Object.hasOwn(value, '@value')) return valueObject(value, documentUrl);
     if (Object.hasOwn(value, '@list')) {
       onlyKeys(value, LIST_KEYS, 'invalid set or list object');
       const items: Term[] = [];
@@ -143,7 +144,7 @@ export function fromJsonLd(body: unknown, documentUrl: string): Dataset {
         if (!isNode(entry)) throw new JsonLdError('invalid @reverse value');
         checkContext(entry);
         for (const [predicate, items] of Object.entries(entry)) {
-          if (predicate.startsWith('@') && predicate !== '@context')
+          if (KEYWORDS.has(predicate) && predicate !== '@context')
             throw new JsonLdError('invalid reverse property map');
           // An unmapped reverse property states nothing, nor does its value.
           if (!isPredicate(predicate)) continue;
@@ -171,6 +172,7 @@ export function fromJsonLd(body: unknown, documentUrl: string): Dataset {
           )
             throw new JsonLdError('invalid @nest value');
           checkContext(inner);
+          checkIndex(inner);
           properties(inner, subject, graph);
         }
       } else if (!key.startsWith('@') && isPredicate(key)) {
@@ -213,8 +215,47 @@ const VALUE_KEYS = new Set([
   '@context',
 ]);
 
+/** The JSON-LD 1.1 keywords. */
+const KEYWORDS = new Set(
+  [
+    'base',
+    'container',
+    'context',
+    'direction',
+    'graph',
+    'id',
+    'import',
+    'included',
+    'index',
+    'json',
+    'language',
+    'list',
+    'nest',
+    'none',
+    'prefix',
+    'propagate',
+    'protected',
+    'reverse',
+    'set',
+    'type',
+    'value',
+    'version',
+    'vocab',
+  ].map((name) => `@${name}`),
+);
+
+/**
+ * A key that expansion without a context drops before it checks an
+ * object's shape: neither a keyword nor containing a colon, or of the
+ * keyword form without being one, such as `@future` (JSON-LD 1.1
+ * expansion, step 13.3).
+ */
+function unmapped(key: string): boolean {
+  return !KEYWORDS.has(key) && (/^@[a-zA-Z]+$/.test(key) || !key.includes(':'));
+}
+
 /** A value object as a literal; a null value states nothing, except as JSON. */
-function valueObject(value: JsonLd): Term | undefined {
+function valueObject(value: JsonLd, documentUrl: string): Term | undefined {
   onlyKeys(value, VALUE_KEYS, 'invalid value object');
   const native = value['@value'];
   const type = value['@type'];
@@ -222,7 +263,7 @@ function valueObject(value: JsonLd): Term | undefined {
   const direction = value['@direction'];
   if (type !== undefined && (language !== undefined || direction !== undefined))
     throw new JsonLdError('invalid value object');
-  if (type === '@json') return literal(withoutMetadata(value));
+  if (type === '@json') return literal(literalOf(value, type));
   // The keywords are checked also for a null value, as JSON-LD expands them.
   if (language !== undefined) {
     if (typeof language !== 'string')
@@ -236,22 +277,43 @@ function valueObject(value: JsonLd): Term | undefined {
     if (Array.isArray(type) && type.every((t) => typeof t === 'string'))
       throw new JsonLdError('invalid typed value');
     if (typeof type !== 'string') throw new JsonLdError('invalid type value');
-    if (!ABSOLUTE_IRI.test(type) || type.startsWith('_:'))
-      throw new JsonLdError('invalid typed value');
   }
+  const datatype =
+    type === undefined ? undefined : datatypeOf(type, documentUrl);
   if (native === null) return undefined;
   if (typeof native === 'object')
     throw new JsonLdError('invalid value object value');
   if (language !== undefined && typeof native !== 'string')
     throw new JsonLdError('invalid language-tagged value');
-  return literal(withoutMetadata(value));
+  return literal(literalOf(value, datatype));
 }
 
-function withoutMetadata(value: JsonLd): JsonLd {
-  const rest = { ...value };
-  delete rest['@index'];
-  delete rest['@context'];
-  return rest;
+/** The literal's own keys, without metadata and keys expansion drops. */
+function literalOf(value: JsonLd, type: string | undefined): JsonLd {
+  const literal: Record<string, unknown> = { '@value': value['@value'] };
+  if (type !== undefined) literal['@type'] = type;
+  for (const key of ['@language', '@direction'])
+    if (Object.hasOwn(value, key)) literal[key] = value[key];
+  return literal;
+}
+
+/**
+ * A literal's datatype IRI: absolute as given, or a relative reference
+ * resolved against the document URL, as expansion does for `@type`. A
+ * blank node, whitespace or an unresolvable reference is no datatype.
+ */
+function datatypeOf(type: string, documentUrl: string): string {
+  if (type.startsWith('_:') || /\s/.test(type))
+    throw new JsonLdError('invalid typed value');
+  if (SCHEME.test(type)) {
+    if (!ABSOLUTE_IRI.test(type)) throw new JsonLdError('invalid typed value');
+    return type;
+  }
+  try {
+    return new URL(type, documentUrl).href;
+  } catch {
+    throw new JsonLdError('invalid typed value');
+  }
 }
 
 /**
@@ -310,7 +372,7 @@ function isNodeObject(value: unknown): value is JsonLd {
 }
 
 function onlyKeys(value: JsonLd, keys: ReadonlySet<string>, code: string) {
-  if (Object.keys(value).some((key) => !keys.has(key)))
+  if (Object.keys(value).some((key) => !keys.has(key) && !unmapped(key)))
     throw new JsonLdError(code);
 }
 

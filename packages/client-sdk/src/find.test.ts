@@ -1228,3 +1228,32 @@ describe('Find groups as named-graph JSON-LD writes them', () => {
     },
   );
 });
+
+describe('Find values read as JSON-LD expansion reads them', () => {
+  it('resolves a relative datatype against the Find URL', async () => {
+    const graph = [
+      { '@id': `${base}/e1`, 'x:p': [{ '@value': 'red', '@type': '#Color' }] },
+    ];
+    expect(await ok(answering(graph, base).pod.findFlat('x'))).toEqual({
+      nodes: [
+        {
+          '@id': `${base}/e1`,
+          'x:p': [{ '@value': 'red', '@type': `${url}#Color` }],
+        },
+      ],
+      observations: [],
+    });
+  });
+
+  it('drops an unmapped key of a list, as expansion does', async () => {
+    const graph = [
+      { '@id': `${base}/e1`, 'x:p': [{ '@list': ['red'], note: 'memo' }] },
+    ];
+    expect(await ok(answering(graph, base).pod.findFlat('x'))).toEqual({
+      nodes: [
+        { '@id': `${base}/e1`, 'x:p': [{ '@list': [{ '@value': 'red' }] }] },
+      ],
+      observations: [],
+    });
+  });
+});
