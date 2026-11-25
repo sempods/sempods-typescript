@@ -32,7 +32,12 @@ type Subject =
 type Term =
   | Subject
   | { readonly kind: 'literal'; readonly value: JsonLd }
-  | { readonly kind: 'list'; readonly items: readonly Term[] };
+  /** A non-empty list is its own collection; `id` keeps two apart. */
+  | {
+      readonly kind: 'list';
+      readonly items: readonly Term[];
+      readonly id: number;
+    };
 /** `undefined` is the default graph. */
 type Graph = string | undefined;
 interface Quad {
@@ -105,6 +110,7 @@ function read(body: unknown): {
   const seen = new Set<string>();
   const subjects = new WeakMap<JsonLd, Subject>();
   let fresh = 0;
+  let lists = 1;
 
   const emit = (s: Subject, p: string, o: Term, g: Graph): void => {
     const key = `${termKey(s)} ${p} ${termKey(o)} ${g ?? ''}`;
@@ -131,7 +137,9 @@ function read(body: unknown): {
     if (!isNode(value))
       return value === null ? undefined : literal({ '@value': value });
     if (Object.hasOwn(value, '@value')) {
-      if (value['@value'] === null) return undefined;
+      // A null value states nothing, except as a JSON literal.
+      if (value['@value'] === null && value['@type'] !== '@json')
+        return undefined;
       const rest = { ...value };
       delete rest['@index'];
       return literal(rest);
@@ -142,7 +150,7 @@ function read(body: unknown): {
         const term = object(item, embedded);
         if (term) items.push(term);
       }
-      return { kind: 'list', items };
+      return { kind: 'list', items, id: items.length > 0 ? lists++ : 0 };
     }
     embedded.push(value);
     return subjectOf(value);
@@ -366,7 +374,8 @@ function termKey(term: Term): string {
     case 'literal':
       return canonical(term.value);
     case 'list':
-      return `(${term.items.map(termKey).join(' ')})`;
+      // The empty list is rdf:nil; every other one has its own head node.
+      return term.id === 0 ? '()' : `(#${term.id})`;
   }
 }
 

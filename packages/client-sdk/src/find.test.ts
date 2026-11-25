@@ -860,4 +860,23 @@ describe('Find answers read by the RDF they encode', () => {
       );
     },
   );
+
+  it('keeps a JSON null literal and two lists with the same members', async () => {
+    const data = 'x:data';
+    const tags = 'x:tags';
+    const node = {
+      '@id': one,
+      [data]: [{ '@value': null, '@type': '@json' }],
+      [tags]: [
+        { '@list': [{ '@value': 'a' }] },
+        { '@list': [{ '@value': 'a' }] },
+      ],
+    };
+    const [grouped, flat] = await both([node]);
+    expect(flat).toEqual({
+      kind: 'ok',
+      body: { nodes: [node], observations: [] },
+    });
+    expect(grouped).toMatchObject({ kind: 'ok', body: [{ nodes: [node] }] });
+  });
 });
