@@ -491,12 +491,12 @@ not silently emulated:
 | Union or multi-context CRUD reads (no or repeated `?context=`)     | SPS-CRUD-014–017                     | Use Pod SPARQL for cross-Context queries; CRUD stays Context-bound                    |
 | `include_contexts`, N-Quads, `HEAD`, `OPTIONS`, `Link: rel="edit"` | SPS-CRUD-022, -026, -040, -057, -058 | JSON-LD only; no provenance per value, also not on a slot read                        |
 | SPARQL ASK                                                         | `sparql.md`                          | Pod or Context SELECT/CONSTRUCT                                                       |
-| The Find `type` filter, the flat Find form and N-Quads             | SPS-FIND-006–008, -018, -020         | `pod.find` always asks for the Context-grouped JSON-LD form                           |
+| Find answers as N-Quads                                            | SPS-FIND-020                         | `find` and `findFlat` ask for JSON-LD                                                 |
 | Context management, grants, media, MCP, OIDC modules               | `modules/*`, `grants.md`             | Out of scope for the client                                                           |
 | Conditional catalogue reads (`If-None-Match`)                      | SPS-CTX-035                          | Every catalogue read is fresh (`cache: 'no-store'`); nothing is reused across callers |
 
 Protocol facts the client preserves: JSON-LD read bodies are returned as
-answered; SELECT decodes wire terms without changing their lexical values, language
+answered, except Find's normalized nodes; SELECT decodes wire terms without changing their lexical values, language
 tags or datatype IRIs; writes return the answered
 status and a pod-local `Location` for a creation; resource writes return no
 entity tag (SPS-CRUD-030), value writes the slot's (SPS-CRUD-052); conflicts
