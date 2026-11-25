@@ -168,7 +168,7 @@ describe('observations in the shared cases', () => {
       observations: [observation],
     });
     expect(observation).toEqual({
-      id: expect.stringMatching(/^_:a\d+-/),
+      id: expect.stringMatching(/^_:a[0-9a-f]+-/),
       links: [{ hit, context: A }],
       details: [],
       text: [],
@@ -193,7 +193,7 @@ describe('observations in the shared cases', () => {
     ]);
     expect(inB!.observations).toEqual([
       {
-        id: expect.stringMatching(/^_:a\d+-/),
+        id: expect.stringMatching(/^_:a[0-9a-f]+-/),
         links: [{ hit, context: B }],
         details: [
           {

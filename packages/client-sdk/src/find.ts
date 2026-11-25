@@ -16,6 +16,10 @@ export const FIND_RESULT = 'https://schema.sempods.org/findResult';
 const SCHEMA_TEXT = 'https://schema.org/text';
 const SCHEMA_POSITION = 'https://schema.org/position';
 const SPS_ENGINE = 'https://schema.sempods.org/engine';
+const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const RDF_FIRST = `${RDF}first`;
+const RDF_REST = `${RDF}rest`;
+const RDF_NIL = `${RDF}nil`;
 
 /*
  * A Find answer is read by the RDF it encodes, not by its JSON shape: the
@@ -60,7 +64,7 @@ export function decodeGroupedFind(
   scope: readonly string[] | undefined,
 ): readonly FindGraph[] {
   const requested = scope && new Set(scope);
-  const { quads, names, blankNamed } = read(body);
+  const { quads, names, blankNamed } = read(body, findUrl(base));
   if (
     blankNamed ||
     quads.some((quad) => quad.g === undefined) ||
@@ -83,23 +87,32 @@ export function decodeGroupedFind(
  */
 export function decodeFlatFind(
   body: unknown,
+  base: string,
   scope: readonly string[] | undefined,
 ): FlatFindGraph {
-  const { quads, names, blankNamed } = read(body);
+  const { quads, names, blankNamed } = read(body, findUrl(base));
   if (blankNamed || names.length > 0) throw invalid();
   if (scope?.length === 0 && quads.length > 0) throw invalid();
   const [{ nodes, observations }] = build(quads, [undefined]) as [Built];
   return Object.freeze({ nodes, observations });
 }
 
+/** The document URL that relative references resolve against. */
+function findUrl(base: string): string {
+  return `${base}/_system/find`;
+}
+
 /**
  * Expanded JSON-LD to quads (JSON-LD 1.1 toRdf for documents without an
- * active context). Named graphs are read where JSON-LD puts them, at the
+ * active context, with the Find URL as the document base). Named graphs are read where JSON-LD puts them, at the
  * top of the document; their names are kept in order, also of an empty
  * graph, because a group without statements still names a Context the
  * decoder must check. Blank-node labels are scoped to this answer.
  */
-function read(body: unknown): {
+function read(
+  body: unknown,
+  documentUrl: string,
+): {
   readonly quads: readonly Quad[];
   readonly names: readonly string[];
   readonly blankNamed: boolean;
@@ -127,7 +140,9 @@ function read(body: unknown): {
       const id = value['@id'];
       if (id !== undefined && typeof id !== 'string') throw invalid();
       subject =
-        id === undefined ? { kind: 'blank', id: `f${fresh++}` } : reference(id);
+        id === undefined
+          ? { kind: 'blank', id: `f${fresh++}` }
+          : reference(id, documentUrl);
       subjects.set(value, subject);
     }
     return subject;
@@ -164,36 +179,75 @@ function read(body: unknown): {
     // A graph nested in a node is no part of a Find answer.
     if (!isNodeObject(value) || Object.hasOwn(value, '@graph')) throw invalid();
     checkContext(value);
-    const subject = subjectOf(value);
+    properties(value, subjectOf(value), graph);
+  };
+  /** The statements of a node object or of a `@nest` object inside it. */
+  const properties = (value: JsonLd, subject: Subject, graph: Graph) => {
     for (const [key, entry] of Object.entries(value)) {
       if (key === '@type') {
         for (const type of list(entry)) {
           if (typeof type !== 'string') throw invalid();
-          emit(subject, RDF_TYPE, reference(type), graph);
+          emit(subject, RDF_TYPE, reference(type, documentUrl), graph);
         }
       } else if (key === '@reverse') {
         if (!isNode(entry)) throw invalid();
         checkContext(entry);
         for (const [predicate, values] of Object.entries(entry)) {
-          if (predicate === '@context') continue;
+          // An unmapped reverse property states nothing, nor does its value.
+          if (!isPredicate(predicate)) continue;
           for (const item of list(values)) {
             if (!isNodeObject(item)) throw invalid();
-            if (isPredicate(predicate))
-              emit(subjectOf(item), predicate, subject, graph);
+            emit(subjectOf(item), predicate, subject, graph);
             node(item, graph);
           }
         }
       } else if (key === '@included') {
         for (const item of list(entry)) node(item, graph);
+      } else if (key === '@nest') {
+        // Nested properties belong to the containing node.
+        for (const nested of list(entry)) {
+          if (!isNodeObject(nested) || Object.hasOwn(nested, '@id'))
+            throw invalid();
+          checkContext(nested);
+          properties(nested, subject, graph);
+        }
       } else if (!key.startsWith('@') && isPredicate(key)) {
         for (const item of list(entry)) {
           const embedded: JsonLd[] = [];
           const term = object(item, embedded);
-          if (term) emit(subject, key, term, graph);
+          if (
+            term?.kind === 'list' &&
+            term.items.length > 0 &&
+            key === FIND_RESULT
+          )
+            // A collection's head is a blank node: as the object of a link it
+            // is an observation, so write its rdf:first/rdf:rest chain.
+            emit(subject, key, chain(term, graph), graph);
+          else if (term) emit(subject, key, term, graph);
           for (const child of embedded) node(child, graph);
         }
       }
     }
+  };
+  /** A non-empty list as explicit rdf:first/rdf:rest statements; its head. */
+  const chain = (
+    term: Extract<Term, { kind: 'list' }>,
+    graph: Graph,
+  ): Subject => {
+    const heads: Subject[] = term.items.map(() => ({
+      kind: 'blank',
+      id: `f${fresh++}`,
+    }));
+    term.items.forEach((item, i) => {
+      emit(heads[i]!, RDF_FIRST, item, graph);
+      emit(
+        heads[i]!,
+        RDF_REST,
+        heads[i + 1] ?? { kind: 'iri', value: RDF_NIL },
+        graph,
+      );
+    });
+    return heads[0]!;
   };
   /** A top-level item: a node of the default graph or a named graph. */
   const top = (value: unknown): void => {
@@ -208,8 +262,9 @@ function read(body: unknown): {
       blankNamed = true;
       return;
     }
-    if (!names.includes(name)) names.push(name);
-    for (const item of list(value['@graph'])) node(item, name);
+    const graph = (reference(name, documentUrl) as { value: string }).value;
+    if (!names.includes(graph)) names.push(graph);
+    for (const item of list(value['@graph'])) node(item, graph);
   };
 
   if (
@@ -228,11 +283,22 @@ function read(body: unknown): {
 /** A named graph's keys; `@index` is metadata JSON-LD toRdf ignores. */
 const GRAPH_KEYS = new Set(['@id', '@graph', '@context', '@index']);
 
-function reference(id: string): Subject {
-  return id.startsWith('_:')
-    ? { kind: 'blank', id: `b${id.slice(2)}` }
-    : { kind: 'iri', value: id };
+/**
+ * A node reference: a blank-node label, an absolute IRI as given, or a
+ * relative reference resolved against the document URL, as JSON-LD
+ * expansion does. One that cannot be resolved rejects the answer.
+ */
+function reference(id: string, documentUrl: string): Subject {
+  if (id.startsWith('_:')) return { kind: 'blank', id: `b${id.slice(2)}` };
+  if (SCHEME.test(id)) return { kind: 'iri', value: id };
+  try {
+    return { kind: 'iri', value: new URL(id, documentUrl).href };
+  } catch {
+    throw invalid();
+  }
 }
+
+const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
 interface Built {
   readonly graph: Graph;
@@ -246,9 +312,6 @@ interface Building {
   readonly details: Map<Graph, Record<string, unknown>>;
 }
 
-/** Counts answers, so blank nodes of two answers never share a label. */
-let answers = 0;
-
 /**
  * Splits the quads into pod data and generated observations (SPS-FIND-028).
  * A blank node that an IRI links to with `sps:findResult` is an
@@ -261,7 +324,9 @@ let answers = 0;
  * its link, so a bare link still names it.
  */
 function build(quads: readonly Quad[], graphs: readonly Graph[]): Built[] {
-  const answer = answers++;
+  // A random namespace per answer: blank nodes of two answers never share
+  // a label, also across workers and copies of this module.
+  const answer = crypto.randomUUID().replaceAll('-', '');
   const label = (id: string) => `_:a${answer}-${id}`;
   const idOf = (s: Subject) => (s.kind === 'iri' ? s.value : label(s.id));
   const value = (term: Term): JsonLd => {
@@ -359,10 +424,16 @@ function freezeObservation(entry: Building): FindObservation {
     details.flatMap(
       ({ node }) => (node[predicate] as readonly JsonLd[] | undefined) ?? [],
     );
+  /** Plain, `xsd:string` or language-tagged literals, by their RDF form. */
   const strings = (predicate: string): string[] =>
-    values(predicate)
-      .map((v) => v['@value'])
-      .filter((v): v is string => typeof v === 'string');
+    values(predicate).flatMap((v) => {
+      const rdf = lexical(v);
+      const type = rdf['@type'];
+      return typeof rdf['@value'] === 'string' &&
+        (type === undefined || type === `${XSD}string`)
+        ? [rdf['@value']]
+        : [];
+    });
   return Object.freeze({
     id: entry.id,
     links: Object.freeze([...entry.links]),

@@ -45,7 +45,7 @@ export const bodyRejected = {
 export function stable(answer: unknown): unknown {
   const names = new Map<string, string>();
   return JSON.parse(
-    JSON.stringify(answer).replace(/_:a\d+-[^"]+/g, (label) => {
+    JSON.stringify(answer).replace(/_:a[0-9a-f]+-[^"]+/g, (label) => {
       if (!names.has(label)) names.set(label, `_:${names.size}`);
       return names.get(label)!;
     }),

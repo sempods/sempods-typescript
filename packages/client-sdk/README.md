@@ -209,7 +209,8 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
 - The SDK reads the answer, expanded JSON-LD as the Pod sends it, by the RDF
   it encodes, so every serialization of the same statements gives the same
   result: embedded or separate nodes, `@reverse`, `@set`, `@list`,
-  `@included`, single values or arrays. A local `@context` that could change
+  `@included`, `@nest`, single values or arrays. A relative reference
+  resolves against the Find URL, as in JSON-LD expansion. A local `@context` that could change
   a key or value rejects with `response/body` rather than being misread;
   `null`, `{}` and lists of them are accepted. `nodes` are the Pod's data in one canonical form: one flattened node
   object per subject and group, `@type` an array of IRIs, every other

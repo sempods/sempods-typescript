@@ -198,6 +198,19 @@ describe('Pod find requests', () => {
       ['a blank type', 'x', { types: [' '] }, 'type'],
       ['a relative type', 'x', { types: ['Event'] }, 'type'],
       [
+        'a malformed authority in a type',
+        'x',
+        { types: ['https://[oops'] },
+        'type',
+      ],
+      ['a hole in the types', 'x', { types: new Array<string>(1) }, 'type'],
+      [
+        'a hole in the Contexts',
+        'x',
+        { contexts: new Array<string>(1) },
+        'context',
+      ],
+      [
         'a malformed escape in a type',
         'x',
         { types: ['https://example.org/%GG'] },
@@ -461,8 +474,8 @@ describe('Pod find requests', () => {
     expect(answer.nodes).toEqual([
       { '@id': hit },
       {
-        '@id': expect.stringMatching(/^_:a\d+-bb$/),
-        [FIND_RESULT]: [{ '@id': expect.stringMatching(/^_:a\d+-bc$/) }],
+        '@id': expect.stringMatching(/^_:a[0-9a-f]+-bb$/),
+        [FIND_RESULT]: [{ '@id': expect.stringMatching(/^_:a[0-9a-f]+-bc$/) }],
       },
     ]);
     expect(answer.observations).toMatchObject([
@@ -796,6 +809,46 @@ describe('Find answers read by the RDF they encode', () => {
       ],
     ],
     [
+      'properties nested under @nest',
+      [
+        { '@id': one, '@nest': { [FIND_RESULT]: { '@id': '_:m' } } },
+        { '@id': '_:m', ...text('first') },
+      ],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] },
+        { '@id': '_:m', ...text('first') },
+      ],
+    ],
+    [
+      'an unmapped reverse property and its value',
+      [
+        {
+          '@id': one,
+          [name]: [{ '@value': 'One' }],
+          '@reverse': {
+            unmapped: [{ '@id': two, [name]: [{ '@value': 'Two' }] }],
+          },
+        },
+      ],
+      [{ '@id': one, [name]: [{ '@value': 'One' }] }],
+    ],
+    [
+      'a link to a list, as its rdf:first/rdf:rest statements',
+      [{ '@id': one, [FIND_RESULT]: { '@list': [{ '@value': 'result' }] } }],
+      [
+        { '@id': one, [FIND_RESULT]: [{ '@id': '_:l' }] },
+        {
+          '@id': '_:l',
+          'http://www.w3.org/1999/02/22-rdf-syntax-ns#first': [
+            { '@value': 'result' },
+          ],
+          'http://www.w3.org/1999/02/22-rdf-syntax-ns#rest': [
+            { '@id': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#nil' },
+          ],
+        },
+      ],
+    ],
+    [
       '@included nodes and single values',
       {
         '@id': one,
@@ -1080,5 +1133,76 @@ describe('Find answers read by the RDF they encode', () => {
     await expect(
       read({ '@context': { '@vocab': 'x:' }, '@set': graph }, 'findFlat'),
     ).rejects.toMatchObject(bodyRejected);
+  });
+
+  it('resolves relative references against the Find URL', async () => {
+    // The document is `${base}/_system/find`.
+    const article = 'https://pod.example/articles/42';
+    const flat = await ok(
+      answering(
+        [{ '@id': '/articles/42', [FIND_RESULT]: [{ '@id': '_:m' }] }],
+        base,
+      ).pod.findFlat('x'),
+    );
+    expect(flat.nodes).toEqual([{ '@id': article }]);
+    expect(flat.observations[0]!.links).toEqual([{ hit: article }]);
+    const [group] = await ok(
+      answering(
+        [
+          {
+            '@id': 'contexts/tasks',
+            '@graph': [{ '@id': one, '@type': [event] }],
+          },
+        ],
+        base,
+      ).pod.find('x'),
+    );
+    expect(group!.context).toBe(tasks);
+  });
+
+  it('types text and engine by the RDF datatype, in any order', async () => {
+    const integer = 'http://www.w3.org/2001/XMLSchema#integer';
+    const observation = async (values: unknown[]) =>
+      (
+        await ok(
+          answering(
+            [
+              {
+                '@id': one,
+                [FIND_RESULT]: [
+                  {
+                    'https://schema.org/text': values,
+                    'https://schema.sempods.org/engine': [
+                      { '@value': 'ai', '@type': '@json' },
+                      { '@value': 'sparql-text' },
+                    ],
+                  },
+                ],
+              },
+            ],
+            base,
+          ).pod.findFlat('x'),
+        )
+      ).observations[0]!;
+    const two = [{ '@value': 2 }, { '@value': '2', '@type': integer }];
+    expect((await observation(two)).text).toEqual([]);
+    expect((await observation([...two].reverse())).text).toEqual([]);
+    const tagged = await observation([
+      { '@value': 'Auszug', '@language': 'de' },
+    ]);
+    expect(tagged.text).toEqual(['Auszug']);
+    expect(tagged.engine).toEqual(['sparql-text']);
+  });
+
+  it('gives each answer its own label namespace, also in another module copy', async () => {
+    const body = [{ '@id': one, [FIND_RESULT]: [{ '@id': '_:m' }] }];
+    const copy = async () => {
+      vi.resetModules();
+      const { decodeFlatFind } = await import('./find.js');
+      return decodeFlatFind(body, base, undefined).observations[0]!.id;
+    };
+    const [first, second] = [await copy(), await copy()];
+    expect(first).toMatch(/^_:a[0-9a-f]{32}-bm$/);
+    expect(second).not.toBe(first);
   });
 });

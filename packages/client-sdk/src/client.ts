@@ -523,24 +523,27 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     if (typeof text !== 'string' || !text.trim())
       throw failure({ code: 'invalid-argument', argument: 'text' });
     const { contexts, types, limit } = options;
+    // The members as they will be sent: a hole in a sparse array is checked
+    // as the `undefined` it would become, not skipped.
+    const scope = contexts === undefined ? undefined : members(contexts);
     if (
-      contexts !== undefined &&
-      (!Array.isArray(contexts) ||
-        !contexts.every(
+      scope !== undefined &&
+      (!scope ||
+        !scope.every(
           (iri) => typeof iri === 'string' && isContextIri(iri, base),
         ))
     )
       throw failure({ code: 'invalid-argument', argument: 'context' });
+    const given = types === undefined ? undefined : members(types);
     if (
-      types !== undefined &&
-      (!Array.isArray(types) ||
-        !types.every((iri) => typeof iri === 'string' && isIriRef(iri)))
+      given !== undefined &&
+      (!given ||
+        !given.every((iri) => typeof iri === 'string' && isIriRef(iri)))
     )
       throw failure({ code: 'invalid-argument', argument: 'type' });
     if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0))
       throw failure({ code: 'invalid-argument', argument: 'limit' });
-    const scope = contexts && [...contexts];
-    const type = types && [...new Set(types)];
+    const type = given && [...new Set(given as string[])];
     // One body for every dispatch: an authentication resend repeats it, so
     // the downscope (also an empty one) is never dropped.
     const body = JSON.stringify({
@@ -563,7 +566,10 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
     );
     return read(exchange, url, options.signal, async (response) => ({
       kind: 'ok' as const,
-      body: decode(await json(response), scope),
+      body: decode(
+        await json(response),
+        scope as readonly string[] | undefined,
+      ),
     }));
   }
 
@@ -587,7 +593,9 @@ export function createPod(podUrl: string, options: PodOptions): Pod {
         decodeGroupedFind(body, base, scope),
       ),
     findFlat: (text: string, options: FindOptions = {}) =>
-      find(text, options, false, decodeFlatFind),
+      find(text, options, false, (body, scope) =>
+        decodeFlatFind(body, base, scope),
+      ),
     async catalogue(
       options: ReadOptions = {},
     ): Promise<QueryResult<readonly CatalogueContext[]>> {
@@ -718,6 +726,11 @@ function constructBody(body: unknown): readonly JsonLd[] {
   if (!Array.isArray(body) || !body.every(isNode))
     throw failure({ code: 'response', problem: 'body' });
   return Object.freeze(body);
+}
+
+/** An array's members with holes as `undefined`; `false` for no array. */
+function members(value: unknown): readonly unknown[] | false {
+  return Array.isArray(value) && Array.from(value as unknown[]);
 }
 
 /** UTF-8 base64url without padding (SPS-CRUD-005); works in browsers and Node. */
