@@ -736,7 +736,7 @@ one recovery retry per cycle. See [React Pod overviews](react-authoring.md#pod-o
 `reader.find(text, options)` and `reader.findFlat(text, options)` are the client's
 [Find](../packages/client-sdk/README.md#finding-resources) through the same
 handle; `contexts`, `types` and `limit` pass as given, an omitted `contexts`
-stays omitted and `[]` stays `[]`. It has the same lifetime, `invalidated` and `cancelled` results as
+stays omitted and `[]` stays `[]`. Both have the same lifetime, `invalidated` and `cancelled` results as
 `select`, waits for a `podReadLimit` slot, and takes `priority: 'current'`. A
 connection that reads without a token searches only the Pod's public Contexts.
 Each Pod answers on its own; to search several, use one loader per Pod as in

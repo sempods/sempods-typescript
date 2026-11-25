@@ -206,13 +206,12 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
   this Pod or one outside `contexts`. `findFlat` needs one graph without
   graph names and rejects a named graph, also a nested one. A serialization
   without statements, such as `{}`, is an empty answer in both forms.
-- The SDK reads expanded JSON-LD, as the Pod answers. A local `@context` that
-  could change what a key means rejects with `response/body` rather than
-  being misread; `null`, `{}` and lists of them are accepted.
-- The SDK reads the answer by the RDF it encodes, so every JSON-LD
-  serialization of the same statements gives the same result: embedded or
-  separate nodes, `@reverse`, `@set`, `@list`, `@included`, single values or
-  arrays. `nodes` are the Pod's data in one canonical form: one flattened node
+- The SDK reads the answer, expanded JSON-LD as the Pod sends it, by the RDF
+  it encodes, so every serialization of the same statements gives the same
+  result: embedded or separate nodes, `@reverse`, `@set`, `@list`,
+  `@included`, single values or arrays. A local `@context` that could change
+  a key or value rejects with `response/body` rather than being misread;
+  `null`, `{}` and lists of them are accepted. `nodes` are the Pod's data in one canonical form: one flattened node
   object per subject and group, `@type` an array of IRIs, every other
   property an array of `{"@id"}`, `{"@value"}` or `{"@list"}` objects. Blank
   nodes of pod data get labels unique to the answer. A hit's type and label
@@ -222,14 +221,14 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
   `sps:findResult`, with an excerpt (`schema:text`), a 1-based position
   (`schema:position`) or an engine (`sps:engine`). The SDK moves these
   observations out of `nodes` into typed `observations`; ignore them if you
-  need no more than the hits. `position` keeps only positive integers; every
-  value stays in `details`. An observation carries each link and its
+  need no more than the hits. `position` keeps positive integers given as
+  numbers or XSD integer literals; every value stays in `details`. An observation carries each link and its
   statements per Context, with statements that name it from the other side
   under `@reverse`. One that is repeated or split across groups is the same
   object in each group. Its `id` is a blank-node label unique to the answer,
   by which `details` name another observation; the Pod's own label is not
-  kept, so observations of two answers or two Pods never merge. A Context records where the Pod placed
-  the statement, not where the search matched. A stored `sps:findResult` to an
+  kept, so observations of two answers or two Pods never merge. A Context
+  records where the Pod placed the statement, not where the search matched. A stored `sps:findResult` to an
   IRI stays in `nodes` and its source Context.
 - The request is always `POST`; `find` adds `include_contexts`. An
   authentication resend repeats the body unchanged, and the SDK never retries
@@ -404,6 +403,8 @@ export async function removeNickname(
 
 The SDK returns JSON-LD bodies as the Pod answered them. It does not compact,
 frame, reorder or otherwise normalize them; it only checks the outer structure.
+Find is the exception: it reads its answer as RDF and returns normalized
+nodes ([finding resources](#finding-resources)).
 Values are typed `unknown`, so check each one before using it.
 
 `subjects.get` accepts only a JSON object; an array or other JSON rejects with

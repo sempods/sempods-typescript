@@ -47,8 +47,8 @@ The Pod's Find may now describe how it found a hit (#418): an `sps:findResult`
 link from the hit to a blank node with an excerpt, a position or an engine
 ([Find](../packages/client-sdk/README.md#finding-resources)). `pod.find` and
 `BoundPod.find` keep their grouped answer and move these observations out of
-`nodes` into the new `FindGraph.observations`. Without observations the answer
-is as before, with `observations: []`. The prerelease after `0.9.0-dev.3`
+`nodes` into the new `FindGraph.observations`, which is `[]` when the Pod sends
+none; `nodes` come normalized (below). The prerelease after `0.9.0-dev.3`
 carries this; `0.9.0-dev.3` itself has neither `findFlat` nor `types`.
 
 - **Derive hits as before** from `nodes`. A hit reported only by a link is a
@@ -69,10 +69,10 @@ carries this; `0.9.0-dev.3` itself has neither `findFlat` nor `types`.
   Pod filters before `limit`.
 - **Use `findFlat`** for one graph without Contexts.
 - **Strict answers:** `find` now also rejects a group with statements of its
-  own, a graph nested in a node and a local `@context` that changes a key. It
-  accepts one group object without an array, one node as the value of
-  `@graph`, and reads `{}` or other serializations without statements as an
-  empty answer.
+  own, a graph nested in a node and a local `@context` that could change a
+  key or value. It accepts any serialization of the same statements, such as
+  one group object without an array or one node as the value of `@graph`, and
+  reads `{}` or other serializations without statements as an empty answer.
 - A typed test double of `Pod` or `BoundPod` needs `findFlat`. New client-sdk
   types: `FlatFindGraph`, `FindObservation`, `FindLink` and `FindDetail`. The
   `invalid-argument` failure's `argument` gains `'type'`.
