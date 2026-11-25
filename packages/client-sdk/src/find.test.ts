@@ -879,4 +879,20 @@ describe('Find answers read by the RDF they encode', () => {
     });
     expect(grouped).toMatchObject({ kind: 'ok', body: [{ nodes: [node] }] });
   });
+
+  it('keeps JSON literals that differ only in the case of a payload key value', async () => {
+    const node = {
+      '@id': one,
+      'x:data': [
+        { '@value': { '@language': 'EN' }, '@type': '@json' },
+        { '@value': { '@language': 'en' }, '@type': '@json' },
+      ],
+    };
+    const [grouped, flat] = await both([node]);
+    expect(flat).toEqual({
+      kind: 'ok',
+      body: { nodes: [node], observations: [] },
+    });
+    expect(grouped).toMatchObject({ kind: 'ok', body: [{ nodes: [node] }] });
+  });
 });

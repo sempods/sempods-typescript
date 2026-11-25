@@ -372,11 +372,26 @@ function termKey(term: Term): string {
     case 'blank':
       return `_:${term.id}`;
     case 'literal':
-      return canonical(term.value);
+      // A JSON literal's payload is data: compared as JSON, keys sorted,
+      // without the language-tag rules of RDF literals.
+      return term.value['@type'] === '@json'
+        ? `json:${jsonKey(term.value['@value'])}`
+        : canonical(term.value);
     case 'list':
       // The empty list is rdf:nil; every other one has its own head node.
       return term.id === 0 ? '()' : `(#${term.id})`;
   }
+}
+
+/** JSON with object keys sorted, so equal payloads give equal keys. */
+function jsonKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(jsonKey).join(',')}]`;
+  if (isNode(value))
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${jsonKey(value[key])}`)
+      .join(',')}}`;
+  return JSON.stringify(value);
 }
 
 function literal(value: JsonLd): Term {
