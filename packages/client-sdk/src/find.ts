@@ -136,12 +136,15 @@ function read(body: unknown): {
     if (Array.isArray(value)) throw invalid();
     if (!isNode(value))
       return value === null ? undefined : literal({ '@value': value });
+    // Value objects and lists follow the same context rule as nodes.
+    checkContext(value);
     if (Object.hasOwn(value, '@value')) {
       // A null value states nothing, except as a JSON literal.
       if (value['@value'] === null && value['@type'] !== '@json')
         return undefined;
       const rest = { ...value };
       delete rest['@index'];
+      delete rest['@context'];
       return literal(rest);
     }
     if (Object.hasOwn(value, '@list')) {

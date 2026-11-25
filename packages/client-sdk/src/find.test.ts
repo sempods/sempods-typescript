@@ -369,6 +369,26 @@ describe('Pod find requests', () => {
       {},
     ],
     [
+      'a value with a context that changes it',
+      [
+        {
+          '@id': `${base}/e1`,
+          'x:p': [{ '@context': { '@language': 'de' }, '@value': 'Auszug' }],
+        },
+      ],
+      {},
+    ],
+    [
+      'a list with a context that changes it',
+      [
+        {
+          '@id': `${base}/e1`,
+          'x:p': [{ '@context': { '@vocab': 'x:' }, '@list': [] }],
+        },
+      ],
+      {},
+    ],
+    [
       'a default graph with a context that changes a key',
       { '@context': { '@vocab': 'x:' }, '@graph': [{ '@id': `${base}/e1` }] },
       {},
