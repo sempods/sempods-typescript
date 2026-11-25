@@ -544,4 +544,50 @@ describe('Pod find requests', () => {
     expect(observation!.position).toEqual([1]);
     expect(observation!.details[0]!.node[position]).toHaveLength(3);
   });
+
+  it('reads a link written with @reverse like its forward form, in both forms', async () => {
+    const hit = `${base}/e1`;
+    const text = { 'https://schema.org/text': [{ '@value': 'Konzert' }] };
+    const name = { 'https://schema.org/name': [{ '@value': 'Konzert' }] };
+    const forward = [
+      { '@id': hit, ...name, [FIND_RESULT]: [{ '@id': '_:m' }] },
+      { '@id': '_:m', ...text },
+    ];
+    const reverse = [
+      {
+        '@id': '_:m',
+        ...text,
+        '@reverse': { [FIND_RESULT]: [{ '@id': hit, ...name }] },
+      },
+    ];
+    const bare = [{ ...text, '@reverse': { [FIND_RESULT]: { '@id': hit } } }];
+    const read = async (graph: unknown) => {
+      const pod = createPod(base, {
+        auth: bearer('test'),
+        fetch: async () => jsonLd([{ '@id': tasks, '@graph': graph }]),
+      });
+      const flatPod = createPod(base, {
+        auth: bearer('test'),
+        fetch: async () => jsonLd(graph),
+      });
+      return [await pod.find('x'), await flatPod.findFlat('x')];
+    };
+    expect(await read(reverse)).toEqual(await read(forward));
+    const [grouped, flat] = await read(bare);
+    expect(grouped).toMatchObject({
+      kind: 'ok',
+      body: [
+        {
+          nodes: [{ '@id': hit }],
+          observations: [
+            { links: [{ hit, context: tasks }], text: ['Konzert'] },
+          ],
+        },
+      ],
+    });
+    expect(flat).toMatchObject({
+      kind: 'ok',
+      body: { nodes: [{ '@id': hit }], observations: [{ links: [{ hit }] }] },
+    });
+  });
 });

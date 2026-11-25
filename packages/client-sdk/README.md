@@ -216,7 +216,7 @@ export async function search(pod: Pod, text: string, signal: AbortSignal) {
   `sps:findResult`, with an excerpt (`schema:text`), a 1-based position
   (`schema:position`) or an engine (`sps:engine`). The SDK moves these
   observations out of `nodes` into typed `observations`, also from hits
-  embedded in another node; ignore them if you need no more than the hits.
+  embedded in another node or links written with `@reverse`; ignore them if you need no more than the hits.
   `position` keeps only positive integers; every value stays in `details`. An observation carries each link and detail
   with its Context. One that is repeated or split across groups is the same
   object in each group. Its blank-node label is not kept, so observations of

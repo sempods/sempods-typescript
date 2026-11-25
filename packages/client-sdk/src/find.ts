@@ -134,6 +134,10 @@ function observe(groups: readonly Group[]): readonly (Group & {
         const label = blankLabel(value);
         if (label && !labelled.has(label)) labelled.set(label, start());
       }
+    // The same link, written from the observation with `@reverse`.
+    const own = blankLabel(node);
+    if (own && reverseHits(node).length > 0 && !labelled.has(own))
+      labelled.set(own, start());
     for (const child of embedded(node)) discover(child);
   };
   for (const { nodes } of groups) nodes.forEach(discover);
@@ -146,15 +150,59 @@ function observe(groups: readonly Group[]): readonly (Group & {
           const inner = values(value[key]);
           return inner === value[key] ? value : { ...value, [key]: inner };
         }
-      const own = value['@id'];
-      const observation = typeof own === 'string' && labelled.get(own);
+      const own = blankLabel(value);
+      const observation =
+        own === undefined
+          ? undefined
+          : own
+            ? labelled.get(own)
+            : reverseHits(value).length > 0
+              ? start()
+              : undefined;
       if (observation) {
-        observation.details.push(detail(context, value));
-        observation.groups.add(context);
+        absorb(value, observation);
         return MOVED;
       }
       return strip(value);
     };
+    /**
+     * An observation node: its reverse `sps:findResult` links are links like
+     * forward ones, and a hit they name is a node of this group.
+     */
+    const absorb = (value: JsonLd, entry: Building): void => {
+      let node = value;
+      const reverse = value['@reverse'];
+      if (isNode(reverse) && Object.hasOwn(reverse, FIND_RESULT)) {
+        const all = list(reverse[FIND_RESULT]);
+        for (const hit of all.filter(isHitValue)) {
+          entry.links.push(
+            Object.freeze(
+              context === undefined
+                ? { hit: hit['@id'] }
+                : { hit: hit['@id'], context },
+            ),
+          );
+          entry.groups.add(context);
+          const facts = without(hit, '@id');
+          if (Object.keys(facts).length > 0) extra.push(strip(hit));
+          else named.add(hit['@id']);
+        }
+        const rest = without(reverse, FIND_RESULT);
+        const others = all.filter((v) => !isHitValue(v));
+        const next =
+          others.length > 0 ? { ...rest, [FIND_RESULT]: others } : rest;
+        node =
+          Object.keys(next).length > 0
+            ? { ...value, '@reverse': next }
+            : without(value, '@reverse');
+      }
+      if (Object.keys(without(node, '@id')).length > 0) {
+        entry.details.push(detail(context, node));
+        entry.groups.add(context);
+      }
+    };
+    const extra: JsonLd[] = [];
+    const named = new Set<string>();
     const values = (value: unknown): unknown => {
       if (!Array.isArray(value)) {
         const next = item(value);
@@ -218,6 +266,11 @@ function observe(groups: readonly Group[]): readonly (Group & {
       if (next !== MOVED && (Object.keys(node).length > 0 || next !== node))
         kept.push(next as JsonLd);
     }
+    kept.push(...extra);
+    // A hit named only by a reverse link still appears as a node.
+    const present = new Set(kept.map((node) => node['@id']));
+    for (const hit of named)
+      if (!present.has(hit)) kept.push(Object.freeze({ '@id': hit }));
     return { context, nodes: kept };
   });
   const observations = order.map((entry) => ({
@@ -271,8 +324,23 @@ function isHit(node: JsonLd): boolean {
 }
 
 function findResults(node: JsonLd): readonly unknown[] {
-  const value = node[FIND_RESULT];
+  return list(node[FIND_RESULT]);
+}
+
+function list(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : value === undefined ? [] : [value];
+}
+
+/** The hits a node names as reverse `sps:findResult` subjects. */
+function reverseHits(node: JsonLd): readonly JsonLd[] {
+  const reverse = node['@reverse'];
+  return isNode(reverse) ? list(reverse[FIND_RESULT]).filter(isHitValue) : [];
+}
+
+function isHitValue(value: unknown): value is JsonLd & { '@id': string } {
+  return (
+    isNode(value) && !('@value' in value) && !('@list' in value) && isHit(value)
+  );
 }
 
 /**
