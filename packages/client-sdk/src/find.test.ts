@@ -590,4 +590,56 @@ describe('Pod find requests', () => {
       body: { nodes: [{ '@id': hit }], observations: [{ links: [{ hit }] }] },
     });
   });
+
+  it('reads reverse links of an observation embedded in a forward link', async () => {
+    const one = `${base}/e1`;
+    const two = `${base}/e2`;
+    const graph = [
+      {
+        '@id': one,
+        [FIND_RESULT]: [
+          {
+            '@id': '_:m',
+            'https://schema.org/text': [{ '@value': 'Konzert' }],
+            '@reverse': { [FIND_RESULT]: [{ '@id': two }] },
+          },
+        ],
+      },
+    ];
+    const pod = (body: unknown) =>
+      createPod(base, {
+        auth: bearer('test'),
+        fetch: async () => jsonLd(body),
+      });
+    const grouped = await pod([{ '@id': tasks, '@graph': graph }]).find('x');
+    expect(grouped).toMatchObject({
+      kind: 'ok',
+      body: [
+        {
+          nodes: [{ '@id': one }, { '@id': two }],
+          observations: [
+            {
+              links: [
+                { hit: one, context: tasks },
+                { hit: two, context: tasks },
+              ],
+              text: ['Konzert'],
+            },
+          ],
+        },
+      ],
+    });
+    const flat = await pod(graph).findFlat('x');
+    expect(flat).toMatchObject({
+      kind: 'ok',
+      body: {
+        nodes: [{ '@id': one }, { '@id': two }],
+        observations: [{ links: [{ hit: one }, { hit: two }] }],
+      },
+    });
+    if (flat.kind !== 'ok') throw new Error(flat.kind);
+    expect(flat.body.observations[0]!.details[0]!.node).not.toHaveProperty(
+      '@reverse',
+    );
+  });
 });

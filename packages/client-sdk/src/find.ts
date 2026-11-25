@@ -220,9 +220,9 @@ function observe(groups: readonly Group[]): readonly (Group & {
         Object.freeze(context === undefined ? { hit } : { hit, context }),
       );
       entry.groups.add(context);
-      // An embedded node carries its details in place of a reference.
-      const own = without(value as JsonLd, '@id');
-      if (Object.keys(own).length > 0) entry.details.push(detail(context, own));
+      // An embedded node carries its details, and maybe reverse links to
+      // more hits, in place of a reference.
+      absorb(value as JsonLd, entry);
     };
     const strip = (node: JsonLd): JsonLd => {
       let changed = false;
